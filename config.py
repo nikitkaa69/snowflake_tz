@@ -1,0 +1,4 @@
+FILE_PATH = '/opt/airflow/data/Airline_Dataset.csv'
+TABLE_NAME = 'AIRLINE_DWH.RAW.AIRLINE_FLIGHTS_RAW'
+STAGE_NAME = 'AIRLINE_DWH.RAW.AIRLINE_FLIGHTS_STAGE'
+CONN_ID = 'snowflake_default'

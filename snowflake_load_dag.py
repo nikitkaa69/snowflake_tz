@@ -1,15 +1,17 @@
 from airflow.decorators import dag, task
-from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 import pendulum
-
-FILE_PATH = '/opt/airflow/data/Airline_Dataset.csv'
-TABLE_NAME = 'AIRLINE_DWH.RAW.AIRLINE_FLIGHTS_RAW'
-STAGE_NAME = 'AIRLINE_DWH.RAW.AIRLINE_FLIGHTS_STAGE'
+import config
+import snowflake_sql
 
 default_args = {
     'owner': 'airflow',
-    'conn_id': 'snowflake_default'
 }
+
+
+def run_snowflake_query(query):
+    hook = SnowflakeHook(snowflake_conn_id=config.CONN_ID)
+    hook.run(query)
 
 
 @dag(
@@ -22,33 +24,27 @@ default_args = {
 )
 def snowflake_load_dag():
     # Upload local CSV to Snowflake Stage
-    upload_to_stage = SQLExecuteQueryOperator(
-        task_id='upload_to_stage',
-        sql=f'PUT file://{FILE_PATH} @{STAGE_NAME} AUTO_COMPRESS=FALSE OVERWRITE=TRUE;'
-    )
+    @task
+    def upload_to_stage():
+        run_snowflake_query(snowflake_sql.UPLOAD_TO_STAGE_SQL)
 
     # Copy data from Stage to RAW table
-    copy_into_table = SQLExecuteQueryOperator(
-        task_id='copy_into_table',
-        sql=f'''COPY INTO {TABLE_NAME} FROM @{STAGE_NAME}
-                FILE_FORMAT = (TYPE = 'CSV', FIELD_DELIMITER = ',', SKIP_HEADER = 1, FIELD_OPTIONALLY_ENCLOSED_BY = '"')
-                ON_ERROR = 'ABORT_STATEMENT'
-                FORCE = TRUE; '''
-    )
+    @task
+    def copy_into_table():
+        run_snowflake_query(snowflake_sql.COPY_INTO_TABLE_SQL)
 
     # Transform RAW -> CORE (Stored Procedure)
-    call_core_procedure = SQLExecuteQueryOperator(
-        task_id='call_procedure',
-        sql='CALL AIRLINE_DWH.CORE.LOAD_CORE_LAYER();'
-    )
+    @task
+    def call_core_procedure():
+        run_snowflake_query(snowflake_sql.CALL_CORE_PROC_SQL)
 
     # Transform CORE -> MARTS (Stored Procedure)
-    call_marts_procedure = SQLExecuteQueryOperator(
-        task_id='call_marts_procedure',
-        sql='CALL AIRLINE_DWH.MARTS.LOAD_MARTS_LAYER();'
-    )
+    @task
+    def call_marts_procedure():
+        run_snowflake_query(snowflake_sql.CALL_MARTS_PROC_SQL)
 
-    upload_to_stage >> copy_into_table >> call_core_procedure >> call_marts_procedure
+    upload_to_stage() >> copy_into_table() >> call_core_procedure() >> call_marts_procedure()
 
 
-snowflake_load_dag()
+dag_instance = snowflake_load_dag()
+
